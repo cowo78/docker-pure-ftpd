@@ -9,8 +9,10 @@ if [[ "$PURE_FTPD_FLAGS" == *" -d "* ]] || [[ "$PURE_FTPD_FLAGS" == *"--verbosel
 then
     echo "Log enabled, see /var/log/messages"
     rsyslogd
-    rm -rf /var/log/pure-ftpd/pureftpd.log
-    tail --pid $$ -F /var/log/pure-ftpd/pureftpd.log &
+    rm -rf /var/log/pure-ftpd/*
+    # Redirect stderr to NULL so we don't get the "pureftpd.log file does not exist"
+    # message as it really does not exist yet (pureftpd still not started)
+    tail --pid $$ -F /var/log/pure-ftpd/pureftpd.log 2> /dev/null&
 fi
 
 PASSWD_FILE="/etc/pure-ftpd/passwd/pureftpd.passwd"
@@ -25,7 +27,7 @@ fi
 if [ -e /etc/ssl/private/pure-ftpd.pem ] && [[ "$PURE_FTPD_FLAGS" != *"--tls"* ]]
 then
     echo "TLS Enabled"
-    PURE_FTPD_FLAGS="$PURE_FTPD_FLAGS --tls=1 "
+    PURE_FTPD_FLAGS="$PURE_FTPD_FLAGS --tls=2 "
 fi
 
 # If TLS flag is set and no certificate exists, generate it
@@ -57,7 +59,7 @@ then
     PWD_FILE="$(mktemp)"
     echo "$FTP_USER_PASS
 $FTP_USER_PASS" > "$PWD_FILE"
-    
+
     # Set uid/gid
     PURE_PW_ADD_FLAGS=""
     if [ ! -z "$FTP_USER_UID" ]
@@ -113,7 +115,7 @@ fi
 # Set a default value to the env var FTP_MAX_CLIENTS
 if [ -z "$FTP_MAX_CLIENTS" ]
 then
-    FTP_MAX_CLIENTS=5
+    FTP_MAX_CLIENTS=10
 fi
 
 # Set max clients in pure-ftpd options if not already existent
@@ -126,7 +128,7 @@ fi
 # Set a default value to the env var FTP_MAX_CONNECTIONS
 if [ -z "$FTP_MAX_CONNECTIONS" ]
 then
-    FTP_MAX_CONNECTIONS=5
+    FTP_MAX_CONNECTIONS=1
 fi
 
 # Set max connections per ip in pure-ftpd options if not already existent
