@@ -1,3 +1,4 @@
+# escape=\
 #Stage 1 : builder debian image
 FROM debian:buster as builder
 
@@ -16,7 +17,7 @@ deb-src http://security.debian.org buster/updates main\n\
 RUN apt-get -y update && \
 	apt-get -y --force-yes --fix-missing install dpkg-dev debhelper &&\
 	apt-get -y build-dep pure-ftpd
-	
+
 
 # Build from source - we need to remove the need for CAP_SYS_NICE and CAP_DAC_READ_SEARCH
 RUN mkdir /tmp/pure-ftpd/ && \
@@ -58,7 +59,7 @@ RUN dpkg -i /tmp/pure-ftpd/pure-ftpd-common*.deb &&\
 	# dpkg -i /tmp/pure-ftpd/pure-ftpd-ldap_*.deb && \
 	# dpkg -i /tmp/pure-ftpd/pure-ftpd-mysql_*.deb && \
 	# dpkg -i /tmp/pure-ftpd/pure-ftpd-postgresql_*.deb && \
-	rm -Rf /tmp/pure-ftpd 
+	rm -Rf /tmp/pure-ftpd
 
 # prevent pure-ftpd upgrading
 RUN apt-mark hold pure-ftpd pure-ftpd-common
@@ -66,6 +67,18 @@ RUN apt-mark hold pure-ftpd pure-ftpd-common
 # setup ftpgroup and ftpuser
 RUN groupadd ftpgroup &&\
 	useradd -g ftpgroup -d /home/ftpusers -s /dev/null ftpuser
+
+# setup certificate + key in /etc/ssl/private/pure-ftpd.pem
+COPY ssl.cnf /tmp/ssl.cnf
+RUN mkdir -p /etc/ssl/private &&\
+	openssl dhparam -out /etc/ssl/private/pure-ftpd-dhparams.pem 2048 &&\
+	openssl req -x509 -nodes -newkey rsa:2048 -sha256 -keyout \
+		/etc/ssl/private/pure-ftpd.pem \
+		-out /etc/ssl/private/pure-ftpd.pem \
+		-config /tmp/ssl.cnf &&\
+	chmod 600 /etc/ssl/private/*.pem &&\
+	rm /tmp/ssl.cnf
+
 
 # configure rsyslog logging
 RUN echo "" >> /etc/rsyslog.conf && \
@@ -77,6 +90,12 @@ RUN echo "" >> /etc/rsyslog.conf && \
 COPY run.sh /run.sh
 RUN chmod u+x /run.sh
 
+# Add users. Piping an echo "pwd\npwd" into pure-pw does not work so we have
+# a prebuilt password file which we modify with correct UID
+# for I in $(seq 1 10); do echo -e "k$I\nk$I"|./src/pure-pw useradd k$I -u $(whoami) -f pureftpd.passwd  -d /home/ftpusers; done
+COPY pureftpd.passwd /etc/pure-ftpd/passwd
+RUN for I in $(seq 1 10); do pure-pw usermod k$I -f /etc/pure-ftpd/passwd -u ftpuser -m -d /home/ftpusers; done
+
 # cleaning up
 RUN apt-get -y clean \
 	&& apt-get -y autoclean \
@@ -84,12 +103,9 @@ RUN apt-get -y clean \
 	&& rm -rf /var/lib/apt/lists/*
 
 # default publichost, you'll need to set this for passive support
-ENV PUBLICHOST localhost
+ENV PUBLICHOST KServer
 
-# couple available volumes you may want to use
-VOLUME ["/home/ftpusers", "/etc/pure-ftpd/passwd"]
-
-# startup
-CMD /run.sh -l puredb:/etc/pure-ftpd/pureftpd.pdb -E -j -R -P $PUBLICHOST
+# startup, only TLS
+CMD /run.sh -l puredb:/etc/pure-ftpd/pureftpd.pdb  -A -c 10 -C 1 -H -Y 2  -E -j -R -P $PUBLICHOST
 
 EXPOSE 21 30000-30009

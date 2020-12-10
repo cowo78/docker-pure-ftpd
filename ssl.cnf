@@ -1,0 +1,26 @@
+[ req ]
+default_bits            = 2048
+default_keyfile         = privkey.pem
+distinguished_name      = req_distinguished_name
+prompt                  = no
+policy                  = policy_anything
+req_extensions          = v3_req
+x509_extensions         = v3_req
+
+[ req_distinguished_name ]
+C                      = IT
+# ST                     = Test State or Province
+ST                     = Cuneo
+# L                      = Test Locality
+L                      = Alba
+# O                      = Organization Name
+O                      = Cantine Barolo
+# OU                     = Organizational Unit Name
+OU                     = Cantine Barolo
+# CN                     = Common Name
+CN                     = KServer
+# emailAddress           = cantinebarolo@gmail.com
+
+[ v3_req ]
+basicConstraints        = CA:FALSE
+#subjectAltName          = @SubjectAltName@
