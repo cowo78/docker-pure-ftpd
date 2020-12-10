@@ -1,4 +1,9 @@
 # escape=\
+# The resulting image can be run with
+# docker run -d --rm -p 21:21 -p 30000-30009:30000-30009 -h kserver <image>
+# Hostname must be set to kserver (used by pureftpd too) or passive mode will
+# not work.
+
 #Stage 1 : builder debian image
 FROM debian:buster as builder
 
@@ -66,7 +71,9 @@ RUN apt-mark hold pure-ftpd pure-ftpd-common
 
 # setup ftpgroup and ftpuser
 RUN groupadd ftpgroup &&\
-	useradd -g ftpgroup -d /home/ftpusers -s /dev/null ftpuser
+    useradd -g ftpgroup -d /home/ftpusers -s /dev/null ftpuser &&\
+    mkdir /home/ftpusers &&\
+    chown -R ftpuser.ftpgroup /home/ftpusers
 
 # setup certificate + key in /etc/ssl/private/pure-ftpd.pem
 COPY ssl.cnf /tmp/ssl.cnf
@@ -79,7 +86,6 @@ RUN mkdir -p /etc/ssl/private &&\
 	chmod 600 /etc/ssl/private/*.pem &&\
 	rm /tmp/ssl.cnf
 
-
 # configure rsyslog logging
 RUN echo "" >> /etc/rsyslog.conf && \
 	echo "#PureFTP Custom Logging" >> /etc/rsyslog.conf && \
@@ -90,11 +96,15 @@ RUN echo "" >> /etc/rsyslog.conf && \
 COPY run.sh /run.sh
 RUN chmod u+x /run.sh
 
-# Add users. Piping an echo "pwd\npwd" into pure-pw does not work so we have
-# a prebuilt password file which we modify with correct UID
-# for I in $(seq 1 10); do echo -e "k$I\nk$I"|./src/pure-pw useradd k$I -u $(whoami) -f pureftpd.passwd  -d /home/ftpusers; done
-COPY pureftpd.passwd /etc/pure-ftpd/passwd
-RUN for I in $(seq 1 10); do pure-pw usermod k$I -f /etc/pure-ftpd/passwd -u ftpuser -m -d /home/ftpusers; done
+# Create home directories
+RUN for I in $(seq 1 10); do mkdir /home/ftpusers/k$I; done
+RUN chown -R ftpuser.ftpgroup /home/ftpusers
+
+# Add users 'k1' ... 'k10' with password same as user
+# home = /home/ftpusers/<username>
+RUN for I in $(seq 1 10); do (echo k$I; echo k$I) | pure-pw useradd k$I -f /etc/pure-ftpd/pureftpd.passwd -u ftpuser -d /home/ftpusers/k$I -m; done
+# Add 'kroot:kroot' user with home = /home/ftpusers
+RUN (echo kroot; echo kroot) | pure-pw useradd kroot -f /etc/pure-ftpd/pureftpd.passwd -u ftpuser -d /home/ftpusers -m
 
 # cleaning up
 RUN apt-get -y clean \
@@ -102,10 +112,18 @@ RUN apt-get -y clean \
 	&& apt-get -y autoremove \
 	&& rm -rf /var/lib/apt/lists/*
 
-# default publichost, you'll need to set this for passive support
+# Setup for PASV support
 ENV PUBLICHOST KServer
+ENV FTP_MAX_CLIENTS 10
+ENV FTP_MAX_CONNECTIONS 1
+ENV FTP_PASSIVE_PORTS 30000:30009
+# -A = chroot
+# -H = don't log hostnames, only IPs
+# -d = add debugging log
+# -E = no anonymous users
+ENV ADDED_FLAGS -A -H
 
-# startup, only TLS
-CMD /run.sh -l puredb:/etc/pure-ftpd/pureftpd.pdb  -A -c 10 -C 1 -H -Y 2  -E -j -R -P $PUBLICHOST
+# startup, TLS enabled by run.sh
+CMD /run.sh -l puredb:/etc/pure-ftpd/pureftpd.pdb -j -R -P $PUBLICHOST
 
 EXPOSE 21 30000-30009
